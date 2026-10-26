@@ -1,12 +1,65 @@
 # MCP pro ABRA Flexi
 
-TypeScript MCP server pro čtení účetních dat z jedné firmy ABRA Flexi a načítání
+TypeScript MCP server pro čtení účetních dat z více firem a serverů ABRA Flexi a načítání
 citovaných pasáží z ověřeného korpusu českých účetních a daňových předpisů.
 
-První implementace je **read-only, lokální stdio**. Obsahuje skutečný MCP server,
+Server používá **lokální stdio**. Výchozí provoz je read-only; verze 0.4 přidává řízené opravy existujících přijatých faktur s náhledem, podpisem a ověřením výsledku. Obsahuje skutečný MCP server,
 Flexi klienta, runtime validaci schématu, podepsané stránkování, audit a legislativní
 retrieval. Právní korpus zatím není naplněný: právní nástroje vracejí `not_ready`
 a odkazy na oficiální zdroje. Žádné vzorové texty se nevydávají za platné právo.
+
+Verze 0.2 přidává režim `FLEXI_ALLOWED_EVIDENCES=*`: evidence a pole se objevují
+z metadat konkrétní firmy a API role. Zahrnuje dodavatele, DIČ, DPH, účty,
+položky dokladů, účetní deník a číselníky. Dřívější seznam dvanácti polí faktur
+se používá jen ve výchozím omezeném režimu. [Rozsah přístupu](docs/api-access.md)
+rozlišuje metadata dostupných evidencí a skutečně provedené živé testy.
+
+## Řízené opravy faktur (0.4)
+
+Volitelná per-target `writePolicy` přidává `flexi_invoice_update_prepare`,
+`flexi_invoice_update_status` a `flexi_invoice_update_commit`. Vícefiremní
+instalace se zapnutým writerem nabízí 16 nástrojů. Výchozí režim zůstává pouze
+pro čtení. Uložení se týká přesné existující přijaté faktury a jejích existujících
+položek; nevystavuje vytvoření, mazání, platby ani obecné API akce.
+
+Náhled obsahuje skutečný vypočtený dry-run a jeho změny. Lokální operátor podepíše
+přesný intent mimo MCP. Commit používá update-only import s optimistickým zámkem,
+trvale spotřebuje oprávnění před PUT a následně ověří fakturu, položky i požadované
+řádky účetního deníku. Neurčitý výsledek blokuje další pokusy stejného dokladu.
+[Postup a schvalování](docs/invoice-updates.md), [ověřený API kontrakt](docs/research/invoice-write-contract.md).
+
+## Více serverů a firem (0.3)
+
+Jeden proces podporuje více nakonfigurovaných API serverů a firem. Každý cíl má
+samostatného klienta a cache. Discovery ověří přesné `dbNazev`, přístupnost a stav
+`ESTABLISHED`; nově objevená firma nedostane automaticky povolený datový přístup.
+
+Konfigurační JSON má formát [connections.example.json](config/connections.example.json).
+Hesla jsou v proměnných prostředí odkazovaných credential profilem. Aktivace:
+
+```dotenv
+FLEXI_CONFIG_PATH=/absolute/path/to/connections.json
+# Odstraňte aktivní FLEXI_BASE_URL, FLEXI_COMPANY a FLEXI_CONNECTION_NAME.
+# FLEXI_USERNAME/FLEXI_PASSWORD mohou zůstat jako env odkazy credential profilu.
+```
+
+`flexi_server_list` vypíše servery, `flexi_company_list` dostupné firmy na zvoleném
+serveru a profilu, `flexi_target_list` povolené cíle. Discovery firem i seznam
+cílů podporují `pageSize` a `nextCursor`. Datové nástroje mají argument `target`:
+
+```json
+{"target":"primary/production","evidence":"faktura-prijata","fields":["id","kod","nazFirmy"],"pageSize":1}
+```
+
+Při více cílech je `target` povinný, i když je dostupný pouze jeden z nich.
+Neexistuje sdílená aktuální firma. Výsledek i audit nesou původ serveru a firmy;
+cursory se nedají přenášet mezi cíli. Limity HTTP požadavků se sdílejí podle
+kanonického originu napříč firmami a credential profily. Globální `server_info`
+ukazuje nejvýše prvních 20 cílů a jejich celkový počet; úplný seznam je stránkovaný.
+
+Bez `FLEXI_CONFIG_PATH` zůstává podporovaná původní konfigurace jedné firmy.
+Ve vícefiremním režimu je 13 čtecích nástrojů; zapnuté opravy faktur přidávají tři další.
+Podrobnosti: [architektura více firem](docs/multi-server-companies.md).
 
 ## Spuštění
 
@@ -44,8 +97,8 @@ Obecná konfigurace MCP hosta:
     "abra_flexi": {
       "command": "/absolute/path/to/node",
       "args": [
-        "--env-file=/Users/glux/devel/mcp-flexibee/.env",
-        "/Users/glux/devel/mcp-flexibee/dist/index.js"
+        "--env-file=/absolute/path/to/mcp-flexibee/.env",
+        "/absolute/path/to/mcp-flexibee/dist/index.js"
       ]
     }
   }
@@ -56,12 +109,40 @@ Použijte skutečnou absolutní cestu k Node 24+. `MCP_AUDIT_PATH` nastavte abso
 a pro každou instanci zvlášť. Konfigurace MCP hosta se tímto projektem automaticky
 nemění.
 
+### ChatGPT desktop a iPhone
+
+ChatGPT desktop sdílí lokální MCP konfiguraci s Codex CLI. Po buildu lze server
+zaregistrovat pro tento Mac (použijte skutečnou absolutní cestu k Node 24+):
+
+```sh
+codex mcp add abra_flexi -- /opt/homebrew/bin/node /absolute/path/to/mcp-flexibee/scripts/start-chatgpt.mjs
+```
+
+Launcher načítá zdejší `.env` nezávisle na pracovním adresáři hosta. Každé spuštění
+má vlastní auditní řetězec v `.state/chatgpt/audit-<uuid>.jsonl`; pro tento launcher
+se `MCP_AUDIT_PATH` z `.env` přepisuje. Po instalaci načtěte server v nastavení
+MCP aplikace a v nové konverzaci zkontrolujte `/mcp` a zavolejte `server_info`.
+Účetní nástroje vyžadují buď legacy přístupové proměnné, nebo `FLEXI_CONFIG_PATH` a credential proměnné odkazované konfigurací.
+
+Na iPhonu lze lokální server používat přes připojený Mac: v desktop aplikaci
+Settings → Connections → Control this Mac nastavte připojení a spárujte telefon
+QR kódem. V iOS aplikaci otevřete Codex (případně Remote) a zvolte tento Mac.
+Mac musí být vzhůru a online. Dostupnost závisí na účtu a pravidlech workspace.
+Samostatné používání bez Macu vyžaduje další implementaci vzdáleného MCP serveru
+a připojení jako plugin; tato verze poskytuje pouze lokální stdio.
+
+Oficiální návod: [MCP](https://learn.chatgpt.com/docs/extend/mcp) a
+[mobilní připojení](https://learn.chatgpt.com/docs/mobile).
+
 ## Nástroje
 
 | Nástroj | Účel |
 |---|---|
 | `server_info` | Připojená firma, povolené evidence, limity a připravenost korpusu |
-| `flexi_schema_get` | Pole povolená lokální politikou i schématem firmy |
+| `flexi_evidence_list` | Objevení evidencí, jejich názvů a přístupnosti; režim `*` |
+| `flexi_schema_get` | Pole a typy; v režimu `*` také popisky, cíle referencí a hodnoty výčtů |
+| `flexi_relations_get` | Dostupné kolekce navázaných záznamů a jejich cílové evidence; režim `*` |
+| `flexi_relation_list` | Stránkované položky a jiné vazby konkrétního dokladu; režim `*` |
 | `flexi_record_list` | Omezená stránka s vybranými poli a typovanými AND filtry |
 | `flexi_record_get` | Detail podle přesného číselného ID |
 | `czlaw_status` | Verze korpusu, pokrytí, čerstvost a oficiální zdroje |
@@ -100,12 +181,17 @@ protože některé jiné Flexi GET endpointy mohou provádět změny. Redirecty 
 odmítají a TLS ověření zůstává zapnuté. Vlastní CA lze dodat standardním
 `NODE_EXTRA_CA_CERTS` při startu.
 
-Povolené evidence: vydané/přijaté faktury a volitelně adresář/ceník. Výchozí
-konfigurace povoluje jen faktury. Přesný field allowlist je v `src/flexi/policy.ts`.
-API odpověď se znovu ořeže na požadovaná pole. Osobní a firemní údaje v povolených
+Výchozí omezená konfigurace povoluje faktury a volitelně adresář/ceník.
+Režim `FLEXI_ALLOWED_EVIDENCES=*` povoluje evidence zveřejněné přes
+`evidence-list.json` s `evidenceAccess=true` a pole z jejich `properties.json`.
+Credential úložiště, certifikáty a spustitelná konfigurace zůstávají blokované.
+API odpověď se znovu ořeže na požadovaná pole. Referenční pole navíc vracejí
+`@showAs` a `@internalId`, nikdy upstream URL `@ref`. Relace 1:N se čtou odděleně
+přes `flexi_relation_list` s vlastním stránkováním. Osobní a firemní údaje v povolených
 polích zůstávají citlivými daty; tento server je neoznačuje za anonymizovaná.
 
-Limity: nejvýše 100 záznamů na stránku, offset 10 000, 1 MiB upstream odpovědi
+Limity: nejvýše 100 záznamů na stránku, 200 polí v režimu `*` (20 v omezeném
+režimu), offset 10 000, 1 MiB upstream odpovědi
 a 512 KiB MCP výstupu, 15 sekund na celý HTTP stream, čtyři souběžná volání a
 výchozích 60 lokálních volání za minutu. Jde o lokální ochranu, nikoli přesnou
 evidenci denní licence Flexi. Automatické retry není implementované.
@@ -144,7 +230,7 @@ zatím o samostatnou HTTP službu ani plný sémantický právní vyhledávač.
 `npm run check` provede strict TypeScript kontrolu, bezpečnostní/unit testy,
 integraci s oficiálním MCP klientem a build. Testy spouštějí skutečné stdio
 procesy pro obě protokolové generace. Flexi chování je ověřené na syntetických
-fixtures; připojení ke konkrétní živé firmě zatím ověřené není.
+fixtures i malými čtecími dotazy na živé firmě; viz [ověření](docs/verification.md).
 
 První živé ověření může proběhnout i proti ostré firmě pod omezeným API účtem:
 `server_info`, schéma faktur a jedna stránka s `fields:["id","kod"]`, `pageSize:1`.
@@ -159,8 +245,8 @@ potřeba ověřit následně samostatným cíleným testem; tento smoke čte pou
 
 Zbývá naplnění a odborné schválení právního korpusu, automatický update ingest,
 účetní kontrolní pravidla, remote HTTP/OAuth, per-tenant deployment, denní quota
-a provozní monitoring. Zápisy s dry-run, schválením a persistentní idempotencí
-budou samostatná další etapa.
+a provozní monitoring. Opravy existujících přijatých faktur jsou dostupné přes podepsané intenty.
+Vytváření dokladů, mazání a další write workflows zůstávají další etapou.
 
 Oficiální API podklad: [docs/research/abra-flexi-api.md](docs/research/abra-flexi-api.md).
 Architektura a fáze: [docs/architecture.md](docs/architecture.md).

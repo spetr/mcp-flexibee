@@ -9,6 +9,13 @@ export interface AuditEvent {
   at: string;
   operation: string;
   connection: string;
+  scope?: 'global' | 'server' | 'company' | 'unresolved';
+  target?: string;
+  serverId?: string;
+  companyId?: string;
+  database?: string;
+  environment?: 'production' | 'test';
+  readOnly?: boolean;
   outcome: 'started' | 'success' | 'error';
   code?: string;
 }

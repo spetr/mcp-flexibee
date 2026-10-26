@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "readOnly": true,
+  "limits": {
+    "maxConcurrentCalls": 4,
+    "callsPerMinute": 60
+  },
+  "servers": [
+    {
+      "id": "primary",
+      "label": "Hlavní Flexi server",
+      "baseUrl": "https://flexi.example.com:5434",
+      "credentials": {
+        "reader": {
+          "usernameEnv": "FLEXI_USERNAME",
+          "passwordEnv": "FLEXI_PASSWORD"
+        }
+      },
+      "limits": {
+        "maxConcurrentRequests": 4,
+        "requestsPerMinute": 60
+      },
+      "companies": [
+        {
+          "id": "production",
+          "label": "Ukázková firma",
+          "database": "REPLACE_WITH_VERIFIED_DBNAZEV",
+          "credentialId": "reader",
+          "environment": "production",
+          "allowedEvidences": [
+            "*"
+          ]
+        },
+        {
+          "id": "test",
+          "label": "Testovaci",
+          "database": "REPLACE_WITH_VERIFIED_TEST_DBNAZEV",
+          "credentialId": "reader",
+          "environment": "test",
+          "allowedEvidences": [
+            "*"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "second-server",
+      "label": "Další server – pouze ukázka struktury",
+      "baseUrl": "https://second-flexi.example.com:5434",
+      "credentials": {
+        "reader": {
+          "usernameEnv": "FLEXI_SECOND_USERNAME",
+          "passwordEnv": "FLEXI_SECOND_PASSWORD"
+        }
+      },
+      "limits": {
+        "maxConcurrentRequests": 4,
+        "requestsPerMinute": 60
+      },
+      "companies": [
+        {
+          "id": "client-a",
+          "label": "Ukázková firma",
+          "database": "REPLACE_WITH_SECOND_SERVER_DBNAZEV",
+          "credentialId": "reader",
+          "environment": "production",
+          "allowedEvidences": [
+            "faktura-vydana",
+            "faktura-prijata"
+          ]
+        }
+      ]
+    }
+  ]
+}

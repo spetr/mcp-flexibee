@@ -1,8 +1,8 @@
-# Architektura první implementace
+# Architektura implementace
 
 ## Rozsah a hranice
 
-MVP je lokální read-only MCP proces svázaný s jedinou firmou. Oficiální SDK v2
+Server je lokální MCP proces s výchozím režimem pouze pro čtení. Verze 0.3 podporuje registr více serverů a firem; verze 0.4 přidává volitelné podepisované opravy existujících přijatých faktur. Původní jednofiremní konfigurace zůstává kompatibilní. Oficiální SDK v2
 řeší protokol a stdio. Zod validuje přísná vstupní schémata, Flexi core samostatně
 ověřuje doménovou politiku a upstream data. Transport tedy není bezpečnostním
 validátorem domény.
@@ -13,6 +13,7 @@ MCP host
        ├─ strict input / concurrency / quota / audit
        ├─ signed cursor -> src/cursor.ts
        ├─ read-only adapter -> src/flexi/client.ts -> configured HTTPS Flexi
+       ├─ optional invoice updates -> signed intent -> fixed invoice PUT
        └─ dated citations -> src/law/index.ts -> pinned reviewed public release
 ```
 
@@ -36,8 +37,9 @@ odděleným deploymentem s vlastní síťovou identitou a úložištěm.
 - Modulární adresáře místo mnoha workspace balíků. Doménové core je nezávislé
   na MCP SDK a lze je později oddělit do samostatných balíků.
 - Žádná databáze pro read-only MVP. Právní release je neměnný snapshot,
-  audit append-only JSONL, cursory process-local HMAC. PostgreSQL přibude pro
-  identitu, multi-tenancy a persistentní write/idempotency ledger.
+  audit append-only JSONL, cursory process-local HMAC. Verze 0.4 používá lokální
+  persistentní úložiště podepsaných návrhů a výsledků; případný PostgreSQL je
+  další etapou pro vzdálený provoz a více uživatelů.
 - První právní retrieval je výběr podle režimu, tématu a data; neposkytuje
   sémantickou odpověď ani právní kalkulace. Neověřená coverage znamená `not_ready`.
 - SDK poskytuje legacy i moderní wire chování. Nepíšeme vlastní JSON-RPC ani
@@ -54,6 +56,19 @@ bezpečnostní reviewer xhigh. Hlavní agent integruje a ověřuje celý celek.
 Bezpečnostní review vedlo mimo jiné k blokaci budoucího `asOf` a exkluzivnímu
 auditnímu zámku. Oba nálezy mají regresní testy.
 
+## Rozšíření čtecí vrstvy 0.2
+
+`FLEXI_ALLOWED_EVIDENCES=*` zapíná discovery evidencí a polí podle metadat a role API uživatele. `src/flexi/metadata.ts` validuje názvy, typy a vazby; credential a spustitelná konfigurace jsou blokované. Jednotlivé operace stále konstruují pouze pevné GET cesty uvnitř jedné firmy. Kolekce navázaných záznamů mají samostatné stránkování a cursor svázaný s rodičem. Původní omezený režim zůstává pro explicitní seznamy evidencí. Živé čtecí ověření a další hranice popisují `verification.md` a `api-access.md`.
+
+## Více serverů a firem 0.3
+
+`src/connections.ts` drží neměnné cíle server/firma a samostatné firemní klienty.
+`src/flexi/transport.ts` sdílí HTTP limity podle originu, včetně aliasů a credential
+profilů. Registry rozlišuje lokální target od Flexi `dbNazev` a ověřuje přístup i
+připravenost firmy přes stránkované `/c.json`. Firemní metadata, audit a cursor
+binding obsahují cíl; neexistuje globální aktivní firma. Legislativa zůstává
+veřejná a sdílená. [Podrobnosti](multi-server-companies.md).
+
 ## Další fáze
 
 1. Ověřit konkrétní Flexi instanci omezeným čtením skutečného properties a
@@ -64,8 +79,20 @@ auditnímu zámku. Oba nálezy mají regresní testy.
    pravidlo dostane zdroj, časovou použitelnost a odborný eval dataset.
 4. Oddělený deploy legislativního procesu a Flexi connectoru. Remote MCP vyžaduje
    OAuth resource server, ověřenou audience, scopes a tenant isolation.
-5. Zápisy až s odděleným human approval kanálem, dry-run, diffem, persistentní
-   idempotencí, external ID a reconciliation stavu `unknown`.
+5. Rozšířit podepisovaný update-existing postup 0.4 o další domény až s vlastními
+   kontrakty. Unknown zůstává blokovaný do operátorské reconciliation; nevytvářet
+   automatické retry ani obecný write proxy.
 
 Server nikdy nezíská oprávnění k zápisu pouze z instrukce modelu nebo chatového
 souhlasu. Bezpečnostní hranicí je serverová policy a přístupová role ve Flexi.
+
+## Řízené opravy přijatých faktur 0.4
+
+`src/writes.ts` připravuje a ověřuje přesné změny existující přijaté faktury,
+`src/write-store.ts` drží immutable návrh/digest, oddělený podpis, persistentní
+stav a zámky/fence dokumentu. `scripts/approve-write.ts` je operátorská CLI mimo
+MCP. Nativní transport má jedinou úzkou update-existing metodu, zámek Flexi
+`as-gui=true`/`lastUpdate` a create-fail/update-ok na dokladu i všech položkách.
+Schválení zahrnuje vypočtený dry-run a jeho vedlejší změny; výsledek ověřuje i
+finanční invarianty a zadané účetní řádky. Žádná nedoložená regenerate akce se
+nevolá. [Podrobný postup](invoice-updates.md).
